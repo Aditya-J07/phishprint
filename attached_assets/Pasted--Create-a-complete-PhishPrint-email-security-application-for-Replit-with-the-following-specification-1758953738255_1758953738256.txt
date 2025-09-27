@@ -1,0 +1,69 @@
+*Create a complete PhishPrint email security application for Replit with the following specifications:*
+
+Build a Gmail-like email security suite called "PhishPrint" that combines phishing detection, code injection analysis, and interactive AI chat. Requirements:
+
+*Technical Stack:* Python, Streamlit, scikit-learn (Isolation Forest), Plotly for visualizations
+
+*Core Features:*
+1. Gmail-style inbox interface showing 4 demo emails with color-coded risk indicators
+2. Multi-threat detection engine analyzing both phishing patterns and code injection attempts  
+3. Personalized behavioral analysis using Isolation Forest ML model trained on user communication patterns
+4. Interactive chat assistant that answers questions about specific email threats
+5. Real-time PhishScore calculation (0-100) with visual gauge display
+
+*Demo Email Scenarios:*
+- Normal work email (low risk, green indicator)
+- Obvious phishing with urgent language and suspicious URLs (high risk, red)
+- Sophisticated spear phishing from colleague asking for financial approval at unusual time (high risk, red)
+- Newsletter with embedded JavaScript injection code (high risk, red)
+
+*UI Requirements:*
+- Gmail-like layout with email list on left, analysis panel on right
+- Click email to see detailed security breakdown with flags and explanations
+- Plotly gauge showing PhishScore with color-coded risk levels
+- Chat input box where users can ask "Is this safe?" "Why this score?" "What's suspicious?"
+- Professional styling with risk indicators (red/orange/green borders)
+
+*Detection Logic:*
+- Heuristic analysis: suspicious keywords, URL patterns, sender verification
+- ML anomaly detection: learns normal communication timing, length, sender patterns
+- Code injection scanning: regex patterns for script tags, eval(), encoded payloads
+- Combined scoring system with explanatory flags for transparency
+
+*File Structure for Replit:*
+- main.py (Streamlit runner configured for Replit)
+- app.py (complete application code)
+- requirements.txt (all dependencies)
+- .replit and replit.nix (configuration files)
+
+Make it hackathon-ready with instant deployment, professional appearance, and compelling demo flow showing escalating threat detection capabilities. Focus on the personalized behavioral analysis as the key differentiator from generic email filters.
+
+
+
+
+Image explained-:
+The images show:
+- Gmail-like inbox interface with color-coded risk indicators
+- PhishScore display (7.5 'Moderate' shown)
+- Interactive chat overlay for asking questions about emails
+- Professional integration into existing email workflow
+
+Build exactly what these screenshots demonstrate - a seamless security layer that doesn't disrupt the familiar Gmail experience."
+
+*Why Images Help:*
+- AI understands your exact vision instead of guessing
+- Gets the color scheme and layout proportions right
+- Sees the chat overlay positioning and styling
+- Understands the professional, integrated approach vs standalone tool
+
+*What to Include with Images:*
+- Brief description of each screenshot's purpose
+- Specific UI elements you want replicated
+- The chat interaction flow you're envisioning
+
+The visual reference will produce much more accurate code that matches your hackathon presentation needs. Without images, the AI might create a generic security dashboard instead of the Gmail-integrated assistant you're planning.
+
+
+These are the api keys :
+GEMINI_API_KEY=AIzaSyAR8tE8eE-rCwtQR3YbXN62w9Jr7nbApbY
+HUGGINGFACE_API_KEY=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

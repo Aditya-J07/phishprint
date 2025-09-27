@@ -1,0 +1,608 @@
+"""
+PhishPrint - Complete Email Security Suite with API Integration
+Gmail-like interface with AI-powered security analysis
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import re
+import json
+import requests
+import os
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import google.generativeai as genai
+import time
+
+# Configure Streamlit
+st.set_page_config(
+    page_title="PhishPrint Security Suite", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# API Configuration
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyAR8tE8eE-rCwtQR3YbXN62w9Jr7nbApbY')
+HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY', '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')
+
+# Configure Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+
+class APIManager:
+    """Handles all external API calls"""
+    
+    def __init__(self):
+        self.hf_headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+        self.gemini_model = genai.GenerativeModel('gemini-pro')
+    
+    def check_email_breaches(self, email):
+        """Check Have I Been Pwned for email breaches - No API key needed"""
+        try:
+            url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
+            headers = {"User-Agent": "PhishPrint-Security-Tool"}
+            response = requests.get(url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                breaches = response.json()
+                return len(breaches), [breach['Name'] for breach in breaches[:3]]
+            elif response.status_code == 404:
+                return 0, []
+            else:
+                return 0, ["API Error"]
+        except Exception as e:
+            return 0, ["Connection Error"]
+    
+    def analyze_sentiment_urgency(self, text):
+        """Use Hugging Face for emotion/urgency detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/j-hartmann/emotion-english-distilroberta-base"
+            response = requests.post(api_url, headers=self.hf_headers, json={"inputs": text}, timeout=10)
+            
+            if response.status_code == 200:
+                emotions = response.json()
+                if isinstance(emotions, list) and len(emotions) > 0:
+                    # Look for urgency-related emotions
+                    urgency_emotions = ['fear', 'anger', 'surprise']
+                    urgency_score = sum(emotion['score'] for emotion in emotions[0] 
+                                      if emotion['label'].lower() in urgency_emotions)
+                    return min(urgency_score * 100, 50)  # Cap at 50 points
+            return 0
+        except Exception as e:
+            return 0
+    
+    def detect_toxic_content(self, text):
+        """Use Hugging Face for toxic/malicious content detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/unitary/toxic-bert"
+            response = requests.post(api_url, headers=self.hf_headers, json={"inputs": text}, timeout=10)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    # Look for toxic classification
+                    toxic_scores = [item['score'] for item in result[0] if item['label'] == 'TOXIC']
+                    if toxic_scores:
+                        return toxic_scores[0] * 50  # Convert to 0-50 scale
+            return 0
+        except Exception as e:
+            return 0
+    
+    def generate_smart_response(self, question, email_context, analysis_results):
+        """Use Gemini Pro for intelligent chat responses"""
+        try:
+            prompt = f"""
+            You are PhishPrint, an expert email security assistant. Provide clear, educational responses.
+            
+            Email Context:
+            - From: {email_context.get('from', 'Unknown')}
+            - Subject: {email_context.get('subject', 'Unknown')}
+            - Body: {email_context.get('body', '')[:200]}...
+            
+            Security Analysis Results:
+            - Risk Flags: {analysis_results.get('flags', [])}
+            - PhishScore: {analysis_results.get('score', 0)}/100
+            - Breach Data: {analysis_results.get('breaches', [])}
+            
+            User Question: {question}
+            
+            Provide a helpful, educational response that explains email security concepts clearly.
+            Keep responses under 100 words and focus on practical security advice.
+            """
+            
+            response = self.gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return "I'm having trouble accessing my AI analysis right now. Please try asking a more specific question about this email's security features."
+
+class EmailSecurityEngine:
+    """Core security analysis engine"""
+    
+    def __init__(self):
+        self.api_manager = APIManager()
+        self.phish_model = IsolationForest(contamination=0.1, random_state=42)
+        self.user_baseline = None
+        
+        # Security patterns
+        self.phish_keywords = [
+            'urgent', 'immediate action', 'verify account', 'suspended',
+            'click here now', 'limited time', 'congratulations', 'winner',
+            'free money', 'claim now', 'act fast', 'expires today'
+        ]
+        
+        self.injection_patterns = [
+            r'<script.*?>.*?</script>',
+            r'javascript:',
+            r'eval\(',
+            r'document\.write',
+            r'window\.open',
+            r'onclick\s*=',
+            r'onerror\s*=',
+            r'onload\s*=',
+            r'atob\(',
+            r'fromCharCode\('
+        ]
+        
+        self.setup_demo_data()
+    
+    def setup_demo_data(self):
+        """Initialize with demo email data"""
+        # Training data for user baseline
+        historical_emails = []
+        base_time = datetime.now() - timedelta(days=30)
+        
+        for i in range(40):
+            email_time = base_time + timedelta(days=i*0.7, hours=np.random.normal(11, 2))
+            historical_emails.append({
+                'timestamp': email_time,
+                'from': np.random.choice(['team@company.com', 'hr@company.com', 'client@partner.com']),
+                'body': f"Hi, wanted to update you on project status. Everything is progressing well. Best regards.",
+                'subject': f"Project Update {i}"
+            })
+        
+        self.train_baseline(historical_emails)
+        
+        # Demo emails for testing
+        self.demo_emails = {
+            "📧 Normal Work Email": {
+                'from': 'colleague@company.com',
+                'subject': 'Weekly Team Meeting Tomorrow',
+                'body': 'Hi everyone, reminder about our weekly team meeting tomorrow at 2 PM in conference room A. We will discuss project progress and plan for next week.',
+                'timestamp': datetime.now() - timedelta(hours=1),
+                'type': 'legitimate'
+            },
+            "⚠️ Obvious Phishing": {
+                'from': 'security@bank-urgent.suspicious.net',
+                'subject': 'URGENT: Account Suspended - Action Required!!!',
+                'body': 'Your bank account has been suspended due to suspicious activity! Click here NOW to verify: http://bit.ly/fake-bank-login. Act fast or lose access forever! Limited time offer expires in 24 hours!',
+                'timestamp': datetime.now() - timedelta(hours=2),
+                'type': 'phishing'
+            },
+            "🎯 Spear Phishing": {
+                'from': 'colleague@company.com',
+                'subject': 'Quick Financial Approval Needed',
+                'body': 'Hi, I know this is last minute but I need urgent approval for vendor payment. CEO is traveling and this needs to be done today. Please click here to approve: http://finance-portal.fake-company.com/approve',
+                'timestamp': datetime(2024, 1, 15, 2, 30),
+                'type': 'spear_phishing'
+            },
+            "💻 Code Injection": {
+                'from': 'newsletter@techsite.com',
+                'subject': 'New JavaScript Tutorial',
+                'body': 'Check out our latest tutorial! <script>eval(atob("d2luZG93LmxvY2F0aW9uPSJodHRwOi8vbWFsaWNpb3VzLXNpdGUuY29tIjs="))</script> Click here for more: http://techsite.com/tutorial',
+                'timestamp': datetime.now() - timedelta(hours=3),
+                'type': 'code_injection'
+            }
+        }
+    
+    def train_baseline(self, emails):
+        """Train user behavior baseline"""
+        if len(emails) < 5:
+            return
+        
+        features = []
+        for email in emails:
+            features.append(self.extract_features(email))
+        
+        if features:
+            self.phish_model.fit(features)
+            self.user_baseline = {
+                'total_emails': len(emails),
+                'avg_length': np.mean([len(e['body']) for e in emails]),
+                'common_hour': np.bincount([e['timestamp'].hour for e in emails]).argmax()
+            }
+    
+    def extract_features(self, email):
+        """Extract numerical features from email"""
+        body = email.get('body', '')
+        timestamp = email.get('timestamp', datetime.now())
+        
+        return [
+            timestamp.hour,
+            timestamp.weekday(),
+            len(body),
+            body.count('!'),
+            body.count('http'),
+            sum(1 for word in self.phish_keywords if word.lower() in body.lower()),
+            len(re.findall(r'[A-Z]', body)) / max(len(body), 1)
+        ]
+    
+    def analyze_comprehensive(self, email):
+        """Complete security analysis using all methods"""
+        results = {
+            'total_score': 0,
+            'flags': [],
+            'breach_info': {'count': 0, 'breaches': []},
+            'components': {}
+        }
+        
+        # 1. Traditional heuristic analysis
+        heuristic_score, heuristic_flags = self.analyze_heuristics(email)
+        results['components']['heuristic'] = heuristic_score
+        results['flags'].extend(heuristic_flags)
+        
+        # 2. Code injection detection
+        injection_score, injection_flags = self.analyze_code_injection(email)
+        results['components']['code_injection'] = injection_score
+        results['flags'].extend(injection_flags)
+        
+        # 3. API-enhanced analysis
+        api_score, api_flags, breach_info = self.analyze_with_apis(email)
+        results['components']['api_analysis'] = api_score
+        results['flags'].extend(api_flags)
+        results['breach_info'] = breach_info
+        
+        # 4. ML anomaly detection
+        if self.user_baseline:
+            ml_score, ml_flags = self.analyze_ml_anomaly(email)
+            results['components']['ml_anomaly'] = ml_score
+            results['flags'].extend(ml_flags)
+        
+        # Calculate total score (max 100)
+        total = sum(results['components'].values())
+        results['total_score'] = min(total, 100)
+        
+        return results
+    
+    def analyze_heuristics(self, email):
+        """Traditional rule-based analysis"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '').lower()
+        
+        # Keyword analysis
+        for keyword in self.phish_keywords:
+            if keyword.lower() in body:
+                score += 10
+                flags.append(f"Suspicious keyword: '{keyword}'")
+        
+        # URL analysis
+        urls = re.findall(r'http[s]?://[^\s]+', body)
+        for url in urls:
+            if any(suspicious in url.lower() for suspicious in ['bit.ly', 'tinyurl', 'fake', 'suspicious']):
+                score += 15
+                flags.append("Suspicious shortened/fake URL detected")
+        
+        return min(score, 30), flags
+    
+    def analyze_code_injection(self, email):
+        """Detect code injection attempts"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '')
+        
+        for pattern in self.injection_patterns:
+            matches = re.findall(pattern, body, re.IGNORECASE | re.DOTALL)
+            if matches:
+                score += 20
+                flags.append(f"Code injection pattern detected")
+        
+        # Check for encoded payloads
+        if 'atob(' in body or 'fromCharCode(' in body:
+            score += 25
+            flags.append("Encoded payload detected")
+        
+        return min(score, 40), flags
+    
+    def analyze_with_apis(self, email):
+        """API-enhanced analysis"""
+        score = 0
+        flags = []
+        breach_info = {'count': 0, 'breaches': []}
+        
+        # Breach checking
+        sender = email.get('from', '')
+        if '@' in sender:
+            breach_count, breaches = self.api_manager.check_email_breaches(sender)
+            breach_info = {'count': breach_count, 'breaches': breaches}
+            if breach_count > 0:
+                score += min(breach_count * 5, 20)
+                flags.append(f"Sender email found in {breach_count} data breaches")
+        
+        # Sentiment/urgency analysis
+        body = email.get('body', '')
+        if body:
+            urgency_score = self.api_manager.analyze_sentiment_urgency(body)
+            score += urgency_score
+            if urgency_score > 20:
+                flags.append("High urgency/pressure language detected")
+            
+            # Toxic content detection
+            toxic_score = self.api_manager.detect_toxic_content(body)
+            score += toxic_score
+            if toxic_score > 20:
+                flags.append("Potentially malicious content patterns detected")
+        
+        return min(score, 30), flags, breach_info
+    
+    def analyze_ml_anomaly(self, email):
+        """Machine learning anomaly detection"""
+        if not self.user_baseline:
+            return 0, ["Insufficient baseline data for anomaly detection"]
+        
+        features = [self.extract_features(email)]
+        anomaly_score = self.phish_model.decision_function(features)[0]
+        
+        if anomaly_score < -0.1:
+            score = min(abs(anomaly_score) * 50, 30)
+            flags = ["Unusual communication pattern for this user"]
+            return score, flags
+        
+        return 0, []
+    
+    def get_risk_assessment(self, score):
+        """Convert score to risk level and color"""
+        if score >= 70:
+            return "red", "HIGH RISK", "🚨"
+        elif score >= 40:
+            return "orange", "MEDIUM RISK", "⚠️"
+        else:
+            return "green", "LOW RISK", "✅"
+
+class PhishPrintUI:
+    """Main user interface"""
+    
+    def __init__(self):
+        self.engine = EmailSecurityEngine()
+        self.selected_email = None
+        self.analysis_cache = {}
+        
+    def render_header(self):
+        """App header and branding"""
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;">
+            <h1 style="color: white; text-align: center; margin: 0;">🛡️ PhishPrint Security Suite</h1>
+            <p style="color: #f0f0f0; text-align: center; margin: 0.5rem 0 0 0;">AI-Powered Email Security Assistant</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    def render_gmail_interface(self):
+        """Gmail-like email interface"""
+        
+        # Custom CSS
+        st.markdown("""
+        <style>
+        .email-row {
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            margin: 8px 0;
+            border-radius: 8px;
+            background: white;
+            transition: all 0.2s ease;
+        }
+        .email-row:hover {
+            background-color: #f8f9ff;
+            border-color: #667eea;
+            cursor: pointer;
+        }
+        .risk-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .high-risk { background-color: #ff4444; }
+        .medium-risk { background-color: #ff8800; }
+        .low-risk { background-color: #44aa44; }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Main layout
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("## 📬 Inbox")
+            
+            # Email list with analysis
+            for email_name, email_data in self.engine.demo_emails.items():
+                
+                # Analyze email (with caching)
+                if email_name not in self.analysis_cache:
+                    with st.spinner(f"Analyzing {email_name}..."):
+                        analysis = self.engine.analyze_comprehensive(email_data)
+                        self.analysis_cache[email_name] = analysis
+                else:
+                    analysis = self.analysis_cache[email_name]
+                
+                color, risk_level, icon = self.engine.get_risk_assessment(analysis['total_score'])
+                
+                # Email row
+                if st.button(
+                    f"{icon} {email_name} - Score: {analysis['total_score']:.0f}/100",
+                    key=f"email_{email_name}",
+                    use_container_width=True
+                ):
+                    self.selected_email = (email_name, email_data, analysis)
+                
+                # Email preview
+                with st.container():
+                    col_preview, col_score = st.columns([4, 1])
+                    
+                    with col_preview:
+                        st.markdown(f"**From:** {email_data['from']}")
+                        st.markdown(f"**Subject:** {email_data['subject']}")
+                        preview_text = email_data['body'][:100] + "..." if len(email_data['body']) > 100 else email_data['body']
+                        st.markdown(f"*{preview_text}*")
+                    
+                    with col_score:
+                        if color == "red":
+                            st.error(f"🚨 {analysis['total_score']:.0f}")
+                        elif color == "orange":
+                            st.warning(f"⚠️ {analysis['total_score']:.0f}")
+                        else:
+                            st.success(f"✅ {analysis['total_score']:.0f}")
+                
+                st.divider()
+        
+        with col2:
+            if self.selected_email:
+                self.render_analysis_panel()
+            else:
+                self.render_empty_panel()
+    
+    def render_analysis_panel(self):
+        """Detailed analysis panel"""
+        email_name, email_data, analysis = self.selected_email
+        
+        st.markdown("## 🔍 Security Analysis")
+        
+        # Risk gauge
+        color, risk_level, icon = self.engine.get_risk_assessment(analysis['total_score'])
+        
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=analysis['total_score'],
+            title={'text': "PhishScore"},
+            domain={'x': [0, 1], 'y': [0, 1]},
+            gauge={
+                'axis': {'range': [None, 100]},
+                'bar': {'color': color},
+                'steps': [
+                    {'range': [0, 40], 'color': "lightgreen"},
+                    {'range': [40, 70], 'color': "lightyellow"},
+                    {'range': [70, 100], 'color': "lightcoral"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 70
+                }
+            }
+        ))
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk assessment
+        if color == "red":
+            st.error(f"🚨 **{risk_level}** - Do not interact with this email")
+        elif color == "orange":
+            st.warning(f"⚠️ **{risk_level}** - Exercise caution")
+        else:
+            st.success(f"✅ **{risk_level}** - Email appears safe")
+        
+        # Analysis breakdown
+        st.markdown("### 📊 Analysis Breakdown")
+        components = analysis['components']
+        for component, score in components.items():
+            st.markdown(f"**{component.replace('_', ' ').title()}:** {score:.1f}/100")
+        
+        # Security flags
+        if analysis['flags']:
+            st.markdown("### 🚩 Security Flags")
+            for flag in analysis['flags']:
+                st.markdown(f"• {flag}")
+        
+        # Breach information
+        if analysis['breach_info']['count'] > 0:
+            st.markdown("### 🔓 Breach Information")
+            st.error(f"Sender email found in {analysis['breach_info']['count']} data breaches:")
+            for breach in analysis['breach_info']['breaches']:
+                st.markdown(f"• {breach}")
+        
+        # Interactive chat
+        self.render_chat_interface(email_data, analysis)
+    
+    def render_empty_panel(self):
+        """Empty analysis panel"""
+        st.markdown("## 🔍 Analysis Panel")
+        st.info("👈 Select an email from the inbox to see detailed security analysis")
+        
+        # Quick stats
+        st.markdown("### 📊 Security Overview")
+        total_emails = len(self.engine.demo_emails)
+        high_risk = sum(1 for analysis in self.analysis_cache.values() if analysis['total_score'] >= 70)
+        st.metric("Total Emails", total_emails)
+        st.metric("High Risk Detected", high_risk)
+        st.metric("Detection Rate", f"{(high_risk/total_emails)*100:.0f}%")
+    
+    def render_chat_interface(self, email_data, analysis):
+        """Interactive chat with AI assistant"""
+        st.markdown("### 💬 Ask PhishPrint")
+        
+        # Quick question buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Is this email safe?", key="safe_btn"):
+                st.session_state.chat_question = "Is this email safe?"
+        with col2:
+            if st.button("Why this score?", key="score_btn"):
+                st.session_state.chat_question = "Why did this email get this security score?"
+        
+        # Text input
+        user_question = st.text_input(
+            "Ask about this email:",
+            value=st.session_state.get('chat_question', ''),
+            key="chat_input"
+        )
+        
+        if user_question:
+            with st.spinner("PhishPrint is analyzing..."):
+                response = self.engine.api_manager.generate_smart_response(
+                    user_question, email_data, analysis
+                )
+                st.markdown("**PhishPrint AI:**")
+                st.info(response)
+            
+            # Clear the question after response
+            if 'chat_question' in st.session_state:
+                del st.session_state.chat_question
+    
+    def render_app(self):
+        """Main app rendering"""
+        self.render_header()
+        
+        # Status indicator
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            st.success("🤖 AI Analysis: Active")
+        with col2:
+            st.success("🔍 Threat Detection: Online")
+        with col3:
+            st.success("💬 Chat Assistant: Ready")
+        
+        st.divider()
+        
+        # Main interface
+        self.render_gmail_interface()
+        
+        # Footer
+        st.markdown("---")
+        st.markdown("**PhishPrint Security Suite** - Powered by AI | Built for Hackathon Demo")
+
+def main():
+    """Application entry point"""
+    
+    # Initialize session state
+    if 'analysis_cache' not in st.session_state:
+        st.session_state.analysis_cache = {}
+    
+    # Create and run app
+    app = PhishPrintUI()
+    app.render_app()
+
+if __name__ == "__main__":
+    main()

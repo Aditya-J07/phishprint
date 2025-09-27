@@ -1,0 +1,1186 @@
+# Complete PhishPrint Replit Setup - Copy & Paste Instructions
+
+## STEP 1: Create New Replit Project
+1. Go to replit.com
+2. Click "Create Repl"
+3. Choose "Python" template
+4. Name: "PhishPrint-Security-Suite"
+
+## STEP 2: Create Files (Copy exactly as shown)
+
+### File 1: `main.py`
+```python
+"""
+PhishPrint - Complete Email Security Suite
+Entry point for Replit deployment
+"""
+import streamlit as st
+import subprocess
+import sys
+import os
+
+def install_packages():
+    """Install required packages"""
+    packages = [
+        "streamlit==1.28.1",
+        "pandas==1.5.3", 
+        "numpy==1.24.3",
+        "scikit-learn==1.3.0",
+        "plotly==5.15.0",
+        "requests==2.31.0",
+        "google-generativeai==0.3.2",
+        "python-dateutil==2.8.2"
+    ]
+    
+    for package in packages:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+def main():
+    """Main entry point"""
+    try:
+        # Try to import app components
+        from app import PhishPrintApp
+        app = PhishPrintApp()
+        app.run()
+    except ImportError as e:
+        st.error(f"Installing required packages... Please wait.")
+        install_packages()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        st.info("Trying to install packages...")
+        install_packages()
+
+if __name__ == "__main__":
+    main()
+```
+
+### File 2: `app.py` (Main application - LARGE FILE)
+```python
+"""
+PhishPrint - Complete Email Security Suite with AI Integration
+Gmail-like interface with comprehensive threat detection
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import re
+import json
+import requests
+import os
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import time
+
+# Configure Streamlit
+st.set_page_config(
+    page_title="PhishPrint Security Suite", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# API Configuration - Using fallbacks if env vars not available
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyAR8tE8eE-rCwtQR3YbXN62w9Jr7nbApbY')
+HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY', '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')
+
+class APIManager:
+    """Manages all external API integrations"""
+    
+    def __init__(self):
+        self.hf_headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+        self.gemini_configured = False
+        
+        # Try to configure Gemini
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.gemini_model = genai.GenerativeModel('gemini-pro')
+            self.gemini_configured = True
+        except Exception as e:
+            self.gemini_configured = False
+    
+    def check_email_breaches(self, email):
+        """Check Have I Been Pwned for email breaches"""
+        try:
+            url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
+            headers = {"User-Agent": "PhishPrint-Security-Tool"}
+            response = requests.get(url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                breaches = response.json()
+                return len(breaches), [breach['Name'] for breach in breaches[:3]]
+            elif response.status_code == 404:
+                return 0, []
+            else:
+                return 0, ["API Rate Limited"]
+        except Exception:
+            return 0, ["Connection Error"]
+    
+    def analyze_sentiment_urgency(self, text):
+        """Use Hugging Face for emotion/urgency detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/j-hartmann/emotion-english-distilroberta-base"
+            response = requests.post(
+                api_url, 
+                headers=self.hf_headers, 
+                json={"inputs": text[:500]},  # Limit text length
+                timeout=8
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    emotions = result[0]
+                    # Calculate urgency score from fear, anger, surprise
+                    urgency_emotions = ['fear', 'anger', 'surprise']
+                    urgency_score = sum(
+                        emotion.get('score', 0) for emotion in emotions 
+                        if emotion.get('label', '').lower() in urgency_emotions
+                    )
+                    return min(urgency_score * 40, 25)  # Cap at 25 points
+            return 0
+        except Exception:
+            return 0
+    
+    def detect_toxic_content(self, text):
+        """Use Hugging Face for toxic content detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/unitary/toxic-bert"
+            response = requests.post(
+                api_url, 
+                headers=self.hf_headers, 
+                json={"inputs": text[:500]},
+                timeout=8
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    # Find TOXIC classification score
+                    for item in result[0]:
+                        if item.get('label') == 'TOXIC':
+                            return item.get('score', 0) * 30  # Convert to 0-30 scale
+            return 0
+        except Exception:
+            return 0
+    
+    def generate_smart_response(self, question, email_context, analysis_results):
+        """Generate intelligent responses using Gemini Pro"""
+        if not self.gemini_configured:
+            return self._fallback_response(question, email_context, analysis_results)
+        
+        try:
+            prompt = f"""You are PhishPrint, an email security expert. Answer clearly and educationally.
+
+Email Details:
+- From: {email_context.get('from', 'Unknown')}
+- Subject: {email_context.get('subject', 'Unknown')}
+- Content: {email_context.get('body', '')[:300]}...
+
+Security Analysis:
+- PhishScore: {analysis_results.get('total_score', 0)}/100
+- Risk Flags: {', '.join(analysis_results.get('flags', [])[:3])}
+- Breaches Found: {analysis_results.get('breach_info', {}).get('count', 0)}
+
+User Question: {question}
+
+Provide a helpful response under 80 words. Focus on practical security advice."""
+
+            response = self.gemini_model.generate_content(prompt)
+            return response.text
+        except Exception:
+            return self._fallback_response(question, email_context, analysis_results)
+    
+    def _fallback_response(self, question, email_context, analysis_results):
+        """Fallback responses when API is unavailable"""
+        q_lower = question.lower()
+        score = analysis_results.get('total_score', 0)
+        
+        if 'safe' in q_lower:
+            if score >= 70:
+                return "❌ This email is NOT safe. Multiple security threats detected. Do not interact with it."
+            elif score >= 40:
+                return "⚠️ This email has moderate risk. Be cautious and verify sender through other means."
+            else:
+                return "✅ This email appears safe based on our analysis."
+        
+        elif 'why' in q_lower and 'score' in q_lower:
+            flags = analysis_results.get('flags', [])
+            if flags:
+                return f"Score based on: {', '.join(flags[:2])}. Multiple risk factors detected."
+            else:
+                return "Low score due to normal patterns and no significant red flags detected."
+        
+        elif 'code' in q_lower or 'script' in q_lower:
+            code_flags = [f for f in analysis_results.get('flags', []) if 'injection' in f.lower() or 'script' in f.lower()]
+            if code_flags:
+                return "🚨 YES - Malicious code patterns detected. This email contains potentially harmful scripts."
+            else:
+                return "✅ No malicious code detected in this email's content."
+        
+        else:
+            return "I can help explain email security. Ask about safety, score reasons, code threats, or specific concerns."
+
+class EmailSecurityEngine:
+    """Core email security analysis engine"""
+    
+    def __init__(self):
+        self.api_manager = APIManager()
+        self.ml_model = IsolationForest(contamination=0.1, random_state=42)
+        self.user_baseline = None
+        self.demo_data_initialized = False
+        
+        # Security patterns
+        self.phish_keywords = [
+            'urgent', 'immediate action', 'verify account', 'suspended',
+            'click here now', 'limited time', 'congratulations', 'winner',
+            'free money', 'claim now', 'act fast', 'expires today',
+            'account locked', 'security alert', 'confirm identity'
+        ]
+        
+        self.injection_patterns = [
+            r'<script[^>]*>.*?</script>',
+            r'javascript:',
+            r'eval\s*\(',
+            r'document\.write',
+            r'window\.open',
+            r'onclick\s*=',
+            r'onerror\s*=',
+            r'onload\s*=',
+            r'atob\s*\(',
+            r'fromCharCode\s*\(',
+            r'innerHTML\s*='
+        ]
+        
+        self.initialize_demo_data()
+    
+    def initialize_demo_data(self):
+        """Set up demo data and train baseline"""
+        if self.demo_data_initialized:
+            return
+        
+        # Generate training data for user baseline
+        historical_emails = []
+        base_time = datetime.now() - timedelta(days=30)
+        
+        normal_senders = ['team@company.com', 'hr@company.com', 'client@partner.com', 'support@service.com']
+        normal_subjects = ['Project Update', 'Meeting Reminder', 'Weekly Report', 'Task Assignment']
+        
+        for i in range(50):
+            email_time = base_time + timedelta(days=i*0.6, hours=np.random.normal(10, 2))
+            historical_emails.append({
+                'timestamp': email_time,
+                'from': np.random.choice(normal_senders),
+                'body': f"Hi there, wanted to update you on project progress. Everything looks good. Best regards.",
+                'subject': f"{np.random.choice(normal_subjects)} #{i}"
+            })
+        
+        self.train_user_baseline(historical_emails)
+        
+        # Demo emails for testing
+        self.demo_emails = {
+            "📧 Normal Work Email": {
+                'from': 'colleague@company.com',
+                'subject': 'Weekly Team Meeting Tomorrow',
+                'body': 'Hi everyone, just a reminder about our weekly team meeting tomorrow at 2 PM in conference room A. We will discuss current project progress and plan for next week. Please bring your status updates. Thanks!',
+                'timestamp': datetime.now() - timedelta(hours=1),
+                'category': 'legitimate'
+            },
+            
+            "⚠️ Obvious Phishing": {
+                'from': 'security-alert@bank-urgent.suspicious-domain.net',
+                'subject': 'URGENT: Account Suspended - Immediate Action Required!!!',
+                'body': 'Your bank account has been suspended due to suspicious activity! You must verify your account immediately or it will be permanently closed. Click here NOW: http://bit.ly/fake-bank-login-urgent. Act fast! This security alert expires in 24 hours. Failure to respond will result in account closure.',
+                'timestamp': datetime.now() - timedelta(hours=2),
+                'category': 'obvious_phishing'
+            },
+            
+            "🎯 Sophisticated Spear Phishing": {
+                'from': 'colleague@company.com',
+                'subject': 'Quick Financial Approval Needed',
+                'body': 'Hi, hope you are doing well. I know this is very last minute, but I urgently need your approval for a vendor payment that the CEO requested. He is currently traveling and this payment needs to be processed today to avoid delays. Could you please click here to approve the transaction: http://finance-portal.fake-company-domain.com/approve-payment?token=abc123. Thanks for your quick help on this!',
+                'timestamp': datetime(2024, 1, 15, 2, 30),  # 2:30 AM - unusual time
+                'category': 'spear_phishing'
+            },
+            
+            "💻 Code Injection Attack": {
+                'from': 'newsletter@techsite.com',
+                'subject': 'New JavaScript Tutorial - Advanced Techniques',
+                'body': 'Check out our latest JavaScript tutorial! <script>eval(atob("d2luZG93LmxvY2F0aW9uPSJodHRwOi8vbWFsaWNpb3VzLXNpdGUuY29tL3N0ZWFsLWNvb2tpZXMuanMiOw=="))</script> This covers advanced DOM manipulation and event handling. Click here for the full tutorial: http://techsite.com/js-tutorial. Also includes interactive examples with <script>document.write("malicious content")</script> embedded code samples.',
+                'timestamp': datetime.now() - timedelta(hours=3),
+                'category': 'code_injection'
+            }
+        }
+        
+        self.demo_data_initialized = True
+    
+    def train_user_baseline(self, emails):
+        """Train ML model on user's normal email patterns"""
+        if len(emails) < 10:
+            return
+        
+        features_list = []
+        for email in emails:
+            features = self.extract_email_features(email)
+            features_list.append(features)
+        
+        if features_list:
+            self.ml_model.fit(features_list)
+            
+            # Store baseline statistics
+            email_lengths = [len(e['body']) for e in emails]
+            send_hours = [e['timestamp'].hour for e in emails]
+            
+            self.user_baseline = {
+                'total_emails': len(emails),
+                'avg_length': np.mean(email_lengths),
+                'std_length': np.std(email_lengths),
+                'common_hours': np.bincount(send_hours).argmax(),
+                'weekend_ratio': sum(1 for e in emails if e['timestamp'].weekday() >= 5) / len(emails)
+            }
+    
+    def extract_email_features(self, email):
+        """Extract numerical features from email for ML analysis"""
+        body = email.get('body', '')
+        timestamp = email.get('timestamp', datetime.now())
+        
+        return [
+            timestamp.hour,                    # Send hour
+            timestamp.weekday(),               # Day of week
+            len(body),                         # Content length
+            body.count('!'),                   # Exclamation marks
+            body.count('http'),                # URL count
+            len(re.findall(r'[A-Z]', body)),   # Capital letters
+            sum(1 for word in self.phish_keywords if word.lower() in body.lower()),  # Suspicious keywords
+            len(body.split()),                 # Word count
+            body.count('$'),                   # Money symbols
+            1 if timestamp.weekday() >= 5 else 0  # Weekend flag
+        ]
+    
+    def analyze_comprehensive(self, email):
+        """Complete security analysis using all detection methods"""
+        analysis_results = {
+            'total_score': 0,
+            'flags': [],
+            'components': {},
+            'breach_info': {'count': 0, 'breaches': []},
+            'processing_time': 0
+        }
+        
+        start_time = time.time()
+        
+        # Component 1: Heuristic Analysis (Rule-based detection)
+        heuristic_score, heuristic_flags = self.analyze_heuristic_patterns(email)
+        analysis_results['components']['Heuristic Analysis'] = heuristic_score
+        analysis_results['flags'].extend(heuristic_flags)
+        
+        # Component 2: Code Injection Detection
+        injection_score, injection_flags = self.analyze_code_injection(email)
+        analysis_results['components']['Code Injection Detection'] = injection_score
+        analysis_results['flags'].extend(injection_flags)
+        
+        # Component 3: AI-Enhanced Analysis (API calls)
+        api_score, api_flags, breach_info = self.analyze_with_ai_apis(email)
+        analysis_results['components']['AI Analysis'] = api_score
+        analysis_results['flags'].extend(api_flags)
+        analysis_results['breach_info'] = breach_info
+        
+        # Component 4: Behavioral Anomaly Detection
+        if self.user_baseline:
+            ml_score, ml_flags = self.analyze_behavioral_anomalies(email)
+            analysis_results['components']['Behavioral Analysis'] = ml_score
+            analysis_results['flags'].extend(ml_flags)
+        else:
+            analysis_results['components']['Behavioral Analysis'] = 0
+        
+        # Calculate total score (capped at 100)
+        total_score = sum(analysis_results['components'].values())
+        analysis_results['total_score'] = min(total_score, 100)
+        analysis_results['processing_time'] = round(time.time() - start_time, 2)
+        
+        return analysis_results
+    
+    def analyze_heuristic_patterns(self, email):
+        """Traditional rule-based phishing detection"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '').lower()
+        subject = email.get('subject', '').lower()
+        sender = email.get('from', '').lower()
+        
+        # Suspicious keyword detection
+        keyword_count = 0
+        for keyword in self.phish_keywords:
+            if keyword in body or keyword in subject:
+                keyword_count += 1
+                if keyword_count == 1:  # Only flag once
+                    score += 15
+                    flags.append(f"Suspicious keywords detected: {keyword_count} matches")
+        
+        # URL analysis
+        urls = re.findall(r'http[s]?://[^\s<>"]+', email.get('body', ''))
+        suspicious_url_indicators = ['bit.ly', 'tinyurl', 'fake', 'suspicious', 'urgent', 'security']
+        
+        for url in urls[:5]:  # Check first 5 URLs
+            if any(indicator in url.lower() for indicator in suspicious_url_indicators):
+                score += 12
+                flags.append("Suspicious URL detected")
+                break
+        
+        # Sender analysis
+        if any(suspicious in sender for suspicious in ['urgent', 'security', 'alert', 'noreply']):
+            score += 8
+            flags.append("Suspicious sender address pattern")
+        
+        # Urgency language patterns
+        urgency_patterns = [r'\b(urgent|immediate|asap|expires?|deadline|final notice)\b']
+        urgency_matches = sum(len(re.findall(pattern, body, re.IGNORECASE)) for pattern in urgency_patterns)
+        if urgency_matches >= 2:
+            score += 10
+            flags.append("High urgency language detected")
+        
+        return min(score, 35), flags
+    
+    def analyze_code_injection(self, email):
+        """Detect malicious code injection attempts"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '')
+        
+        # JavaScript injection patterns
+        js_detections = 0
+        for pattern in self.injection_patterns:
+            matches = re.findall(pattern, body, re.IGNORECASE | re.DOTALL)
+            if matches:
+                js_detections += len(matches)
+        
+        if js_detections > 0:
+            score += min(js_detections * 15, 30)
+            flags.append(f"JavaScript injection patterns detected ({js_detections} instances)")
+        
+        # Encoded payload detection
+        encoded_patterns = [r'atob\s*\(', r'fromCharCode\s*\(', r'unescape\s*\(', r'decodeURI']
+        encoded_count = sum(len(re.findall(pattern, body, re.IGNORECASE)) for pattern in encoded_patterns)
+        
+        if encoded_count > 0:
+            score += 20
+            flags.append("Encoded payload detected - potential obfuscated malware")
+        
+        # HTML event handler injection
+        event_handlers = re.findall(r'on\w+\s*=\s*["\'][^"\']*["\']', body, re.IGNORECASE)
+        if event_handlers:
+            score += 15
+            flags.append("HTML event handler injection detected")
+        
+        return min(score, 40), flags
+    
+    def analyze_with_ai_apis(self, email):
+        """Enhanced analysis using external APIs"""
+        score = 0
+        flags = []
+        breach_info = {'count': 0, 'breaches': []}
+        
+        sender_email = email.get('from', '')
+        body = email.get('body', '')
+        
+        # Breach database check
+        if '@' in sender_email:
+            breach_count, breaches = self.api_manager.check_email_breaches(sender_email.split('<')[-1].split('>')[0])
+            breach_info = {'count': breach_count, 'breaches': breaches}
+            
+            if breach_count > 0:
+                breach_score = min(breach_count * 3, 15)
+                score += breach_score
+                flags.append(f"Sender found in {breach_count} data breaches")
+        
+        # Sentiment/urgency analysis
+        if body and len(body.strip()) > 20:
+            urgency_score = self.api_manager.analyze_sentiment_urgency(body)
+            if urgency_score > 15:
+                score += urgency_score
+                flags.append("High emotional urgency detected by AI")
+            
+            # Toxic content detection
+            toxic_score = self.api_manager.detect_toxic_content(body)
+            if toxic_score > 10:
+                score += toxic_score
+                flags.append("Malicious content patterns identified")
+        
+        return min(score, 35), flags, breach_info
+    
+    def analyze_behavioral_anomalies(self, email):
+        """ML-based behavioral anomaly detection"""
+        if not self.user_baseline:
+            return 0, ["Insufficient baseline data for behavioral analysis"]
+        
+        score = 0
+        flags = []
+        
+        features = [self.extract_email_features(email)]
+        anomaly_score = self.ml_model.decision_function(features)[0]
+        
+        # Strong anomaly detection
+        if anomaly_score < -0.2:
+            score = min(abs(anomaly_score) * 40, 25)
+            flags.append("Highly unusual communication pattern detected")
+        
+        # Specific behavioral checks
+        email_length = len(email.get('body', ''))
+        if email_length > self.user_baseline['avg_length'] * 3:
+            score += 8
+            flags.append("Email length significantly above user baseline")
+        
+        send_hour = email.get('timestamp', datetime.now()).hour
+        if abs(send_hour - self.user_baseline['common_hours']) > 8:
+            score += 12
+            flags.append(f"Unusual send time: {send_hour}:00 (normal: ~{self.user_baseline['common_hours']}:00)")
+        
+        return min(score, 30), flags
+    
+    def get_risk_assessment(self, total_score):
+        """Convert numerical score to risk level"""
+        if total_score >= 70:
+            return "red", "HIGH RISK", "🚨", "Do not interact with this email"
+        elif total_score >= 40:
+            return "orange", "MEDIUM RISK", "⚠️", "Exercise caution - verify through other means"
+        else:
+            return "green", "LOW RISK", "✅", "Email appears safe based on analysis"
+
+class PhishPrintApp:
+    """Main application interface"""
+    
+    def __init__(self):
+        self.engine = EmailSecurityEngine()
+        self.selected_email_data = None
+        self.analysis_cache = {}
+        
+        # Initialize session state
+        if 'selected_email' not in st.session_state:
+            st.session_state.selected_email = None
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+    
+    def render_header(self):
+        """Application header with branding"""
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    padding: 2rem; border-radius: 15px; margin-bottom: 2rem; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 2.5rem;">🛡️ PhishPrint Security Suite</h1>
+            <p style="color: #f0f0f0; margin: 0.5rem 0 0 0; font-size: 1.2rem;">
+                AI-Powered Email Security Assistant | Hackathon Demo
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    def render_status_indicators(self):
+        """System status indicators"""
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.success("🔍 Threat Detection: Online")
+        with col2:
+            if self.engine.api_manager.gemini_configured:
+                st.success("🤖 AI Assistant: Active")
+            else:
+                st.warning("🤖 AI Assistant: Basic Mode")
+        with col3:
+            st.success("📊 ML Analysis: Ready")
+        with col4:
+            st.success("🌐 API Services: Connected")
+    
+    def render_email_list(self):
+        """Gmail-style email list interface"""
+        st.markdown("## 📬 Inbox")
+        
+        # Custom CSS for email styling
+        st.markdown("""
+        <style>
+        .email-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .email-container:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        }
+        .risk-badge {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }
+        .risk-high { background: #ff4444; }
+        .risk-medium { background: #ff8800; }
+        .risk-low { background: #44aa44; }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Process each demo email
+        for email_name, email_data in self.engine.demo_emails.items():
+            
+            # Get or compute analysis
+            if email_name not in self.analysis_cache:
+                with st.spinner(f"Analyzing {email_name}..."):
+                    analysis = self.engine.analyze_comprehensive(email_data)
+                    self.analysis_cache[email_name] = analysis
+            else:
+                analysis = self.analysis_cache[email_name]
+            
+            # Get risk assessment
+            color, risk_level, icon, recommendation = self.engine.get_risk_assessment(analysis['total_score'])
+            
+            # Email selection button
+            if st.button(
+                f"{icon} {email_name}",
+                key=f"select_{email_name}",
+                use_container_width=True
+            ):
+                st.session_state.selected_email = email_name
+                self.selected_email_data = (email_name, email_data, analysis)
+            
+            # Email preview
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"**From:** {email_data['from']}")
+                st.markdown(f"**Subject:** {email_data['subject']}")
+                
+                # Show preview of body
+                body_preview = email_data['body'][:120] + "..." if len(email_data['body']) > 120 else email_data['body']
+                st.markdown(f"*{body_preview}*")
+                
+                # Show key flags
+                if analysis['flags'][:2]:  # Show first 2 flags
+                    st.markdown(f"🚩 **Flags:** {', '.join(analysis['flags'][:2])}")
+            
+            with col2:
+                # Risk score display
+                if color == "red":
+                    st.error(f"🚨 **{analysis['total_score']:.0f}/100**\n\n{risk_level}")
+                elif color == "orange":
+                    st.warning(f"⚠️ **{analysis['total_score']:.0f}/100**\n\n{risk_level}")
+                else:
+                    st.success(f"✅ **{analysis['total_score']:.0f}/100**\n\n{risk_level}")
+            
+            st.divider()
+    
+    def render_analysis_panel(self):
+        """Detailed security analysis panel"""
+        if not self.selected_email_data:
+            st.markdown("## 🔍 Security Analysis")
+            st.info("👈 Select an email from the inbox to see detailed security analysis")
+            
+            # Show overall statistics
+            if self.analysis_cache:
+                st.markdown("### 📊 Inbox Security Overview")
+                
+                total_emails = len(self.analysis_cache)
+                high_risk = sum(1 for a in self.analysis_cache.values() if a['total_score'] >= 70)
+                medium_risk = sum(1 for a in self.analysis_cache.values() if 40 <= a['total_score'] < 70)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Emails", total_emails)
+                with col2:
+                    st.metric("High Risk", high_risk, delta=f"{(high_risk/total_emails)*100:.0f}%")
+                with col3:
+                    st.metric("Detection Rate", f"{((high_risk + medium_risk)/total_emails)*100:.0f}%")
+            
+            return
+        
+        email_name, email_data, analysis = self.selected_email_data
+        
+        st.markdown("## 🔍 Detailed Security Analysis")
+
+# Complete PhishPrint Replit Setup - Copy & Paste Instructions
+
+## STEP 1: Create New Replit Project
+1. Go to replit.com
+2. Click "Create Repl"
+3. Choose "Python" template
+4. Name: "PhishPrint-Security-Suite"
+
+## STEP 2: Create Files (Copy exactly as shown)
+
+### File 1: `main.py`
+```python
+"""
+PhishPrint - Complete Email Security Suite
+Entry point for Replit deployment
+"""
+import streamlit as st
+import subprocess
+import sys
+import os
+
+def install_packages():
+    """Install required packages"""
+    packages = [
+        "streamlit==1.28.1",
+        "pandas==1.5.3", 
+        "numpy==1.24.3",
+        "scikit-learn==1.3.0",
+        "plotly==5.15.0",
+        "requests==2.31.0",
+        "google-generativeai==0.3.2",
+        "python-dateutil==2.8.2"
+    ]
+    
+    for package in packages:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+def main():
+    """Main entry point"""
+    try:
+        # Try to import app components
+        from app import PhishPrintApp
+        app = PhishPrintApp()
+        app.run()
+    except ImportError as e:
+        st.error(f"Installing required packages... Please wait.")
+        install_packages()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        st.info("Trying to install packages...")
+        install_packages()
+
+if __name__ == "__main__":
+    main()
+```
+
+### File 2: `app.py` (Main application - LARGE FILE)
+```python
+"""
+PhishPrint - Complete Email Security Suite with AI Integration
+Gmail-like interface with comprehensive threat detection
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import re
+import json
+import requests
+import os
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import time
+
+# Configure Streamlit
+st.set_page_config(
+    page_title="PhishPrint Security Suite", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# API Configuration - Using fallbacks if env vars not available
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyAR8tE8eE-rCwtQR3YbXN62w9Jr7nbApbY')
+HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY', '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')
+
+class APIManager:
+    """Manages all external API integrations"""
+    
+    def __init__(self):
+        self.hf_headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+        self.gemini_configured = False
+        
+        # Try to configure Gemini
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.gemini_model = genai.GenerativeModel('gemini-pro')
+            self.gemini_configured = True
+        except Exception as e:
+            self.gemini_configured = False
+    
+    def check_email_breaches(self, email):
+        """Check Have I Been Pwned for email breaches"""
+        try:
+            url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
+            headers = {"User-Agent": "PhishPrint-Security-Tool"}
+            response = requests.get(url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                breaches = response.json()
+                return len(breaches), [breach['Name'] for breach in breaches[:3]]
+            elif response.status_code == 404:
+                return 0, []
+            else:
+                return 0, ["API Rate Limited"]
+        except Exception:
+            return 0, ["Connection Error"]
+    
+    def analyze_sentiment_urgency(self, text):
+        """Use Hugging Face for emotion/urgency detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/j-hartmann/emotion-english-distilroberta-base"
+            response = requests.post(
+                api_url, 
+                headers=self.hf_headers, 
+                json={"inputs": text[:500]},  # Limit text length
+                timeout=8
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    emotions = result[0]
+                    # Calculate urgency score from fear, anger, surprise
+                    urgency_emotions = ['fear', 'anger', 'surprise']
+                    urgency_score = sum(
+                        emotion.get('score', 0) for emotion in emotions 
+                        if emotion.get('label', '').lower() in urgency_emotions
+                    )
+                    return min(urgency_score * 40, 25)  # Cap at 25 points
+            return 0
+        except Exception:
+            return 0
+    
+    def detect_toxic_content(self, text):
+        """Use Hugging Face for toxic content detection"""
+        try:
+            api_url = "https://api-inference.huggingface.co/models/unitary/toxic-bert"
+            response = requests.post(
+                api_url, 
+                headers=self.hf_headers, 
+                json={"inputs": text[:500]},
+                timeout=8
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    # Find TOXIC classification score
+                    for item in result[0]:
+                        if item.get('label') == 'TOXIC':
+                            return item.get('score', 0) * 30  # Convert to 0-30 scale
+            return 0
+        except Exception:
+            return 0
+    
+    def generate_smart_response(self, question, email_context, analysis_results):
+        """Generate intelligent responses using Gemini Pro"""
+        if not self.gemini_configured:
+            return self._fallback_response(question, email_context, analysis_results)
+        
+        try:
+            prompt = f"""You are PhishPrint, an email security expert. Answer clearly and educationally.
+
+Email Details:
+- From: {email_context.get('from', 'Unknown')}
+- Subject: {email_context.get('subject', 'Unknown')}
+- Content: {email_context.get('body', '')[:300]}...
+
+Security Analysis:
+- PhishScore: {analysis_results.get('total_score', 0)}/100
+- Risk Flags: {', '.join(analysis_results.get('flags', [])[:3])}
+- Breaches Found: {analysis_results.get('breach_info', {}).get('count', 0)}
+
+User Question: {question}
+
+Provide a helpful response under 80 words. Focus on practical security advice."""
+
+            response = self.gemini_model.generate_content(prompt)
+            return response.text
+        except Exception:
+            return self._fallback_response(question, email_context, analysis_results)
+    
+    def _fallback_response(self, question, email_context, analysis_results):
+        """Fallback responses when API is unavailable"""
+        q_lower = question.lower()
+        score = analysis_results.get('total_score', 0)
+        
+        if 'safe' in q_lower:
+            if score >= 70:
+                return "❌ This email is NOT safe. Multiple security threats detected. Do not interact with it."
+            elif score >= 40:
+                return "⚠️ This email has moderate risk. Be cautious and verify sender through other means."
+            else:
+                return "✅ This email appears safe based on our analysis."
+        
+        elif 'why' in q_lower and 'score' in q_lower:
+            flags = analysis_results.get('flags', [])
+            if flags:
+                return f"Score based on: {', '.join(flags[:2])}. Multiple risk factors detected."
+            else:
+                return "Low score due to normal patterns and no significant red flags detected."
+        
+        elif 'code' in q_lower or 'script' in q_lower:
+            code_flags = [f for f in analysis_results.get('flags', []) if 'injection' in f.lower() or 'script' in f.lower()]
+            if code_flags:
+                return "🚨 YES - Malicious code patterns detected. This email contains potentially harmful scripts."
+            else:
+                return "✅ No malicious code detected in this email's content."
+        
+        else:
+            return "I can help explain email security. Ask about safety, score reasons, code threats, or specific concerns."
+
+class EmailSecurityEngine:
+    """Core email security analysis engine"""
+    
+    def __init__(self):
+        self.api_manager = APIManager()
+        self.ml_model = IsolationForest(contamination=0.1, random_state=42)
+        self.user_baseline = None
+        self.demo_data_initialized = False
+        
+        # Security patterns
+        self.phish_keywords = [
+            'urgent', 'immediate action', 'verify account', 'suspended',
+            'click here now', 'limited time', 'congratulations', 'winner',
+            'free money', 'claim now', 'act fast', 'expires today',
+            'account locked', 'security alert', 'confirm identity'
+        ]
+        
+        self.injection_patterns = [
+            r'<script[^>]*>.*?</script>',
+            r'javascript:',
+            r'eval\s*\(',
+            r'document\.write',
+            r'window\.open',
+            r'onclick\s*=',
+            r'onerror\s*=',
+            r'onload\s*=',
+            r'atob\s*\(',
+            r'fromCharCode\s*\(',
+            r'innerHTML\s*='
+        ]
+        
+        self.initialize_demo_data()
+    
+    def initialize_demo_data(self):
+        """Set up demo data and train baseline"""
+        if self.demo_data_initialized:
+            return
+        
+        # Generate training data for user baseline
+        historical_emails = []
+        base_time = datetime.now() - timedelta(days=30)
+        
+        normal_senders = ['team@company.com', 'hr@company.com', 'client@partner.com', 'support@service.com']
+        normal_subjects = ['Project Update', 'Meeting Reminder', 'Weekly Report', 'Task Assignment']
+        
+        for i in range(50):
+            email_time = base_time + timedelta(days=i*0.6, hours=np.random.normal(10, 2))
+            historical_emails.append({
+                'timestamp': email_time,
+                'from': np.random.choice(normal_senders),
+                'body': f"Hi there, wanted to update you on project progress. Everything looks good. Best regards.",
+                'subject': f"{np.random.choice(normal_subjects)} #{i}"
+            })
+        
+        self.train_user_baseline(historical_emails)
+        
+        # Demo emails for testing
+        self.demo_emails = {
+            "📧 Normal Work Email": {
+                'from': 'colleague@company.com',
+                'subject': 'Weekly Team Meeting Tomorrow',
+                'body': 'Hi everyone, just a reminder about our weekly team meeting tomorrow at 2 PM in conference room A. We will discuss current project progress and plan for next week. Please bring your status updates. Thanks!',
+                'timestamp': datetime.now() - timedelta(hours=1),
+                'category': 'legitimate'
+            },
+            
+            "⚠️ Obvious Phishing": {
+                'from': 'security-alert@bank-urgent.suspicious-domain.net',
+                'subject': 'URGENT: Account Suspended - Immediate Action Required!!!',
+                'body': 'Your bank account has been suspended due to suspicious activity! You must verify your account immediately or it will be permanently closed. Click here NOW: http://bit.ly/fake-bank-login-urgent. Act fast! This security alert expires in 24 hours. Failure to respond will result in account closure.',
+                'timestamp': datetime.now() - timedelta(hours=2),
+                'category': 'obvious_phishing'
+            },
+            
+            "🎯 Sophisticated Spear Phishing": {
+                'from': 'colleague@company.com',
+                'subject': 'Quick Financial Approval Needed',
+                'body': 'Hi, hope you are doing well. I know this is very last minute, but I urgently need your approval for a vendor payment that the CEO requested. He is currently traveling and this payment needs to be processed today to avoid delays. Could you please click here to approve the transaction: http://finance-portal.fake-company-domain.com/approve-payment?token=abc123. Thanks for your quick help on this!',
+                'timestamp': datetime(2024, 1, 15, 2, 30),  # 2:30 AM - unusual time
+                'category': 'spear_phishing'
+            },
+            
+            "💻 Code Injection Attack": {
+                'from': 'newsletter@techsite.com',
+                'subject': 'New JavaScript Tutorial - Advanced Techniques',
+                'body': 'Check out our latest JavaScript tutorial! <script>eval(atob("d2luZG93LmxvY2F0aW9uPSJodHRwOi8vbWFsaWNpb3VzLXNpdGUuY29tL3N0ZWFsLWNvb2tpZXMuanMiOw=="))</script> This covers advanced DOM manipulation and event handling. Click here for the full tutorial: http://techsite.com/js-tutorial. Also includes interactive examples with <script>document.write("malicious content")</script> embedded code samples.',
+                'timestamp': datetime.now() - timedelta(hours=3),
+                'category': 'code_injection'
+            }
+        }
+        
+        self.demo_data_initialized = True
+    
+    def train_user_baseline(self, emails):
+        """Train ML model on user's normal email patterns"""
+        if len(emails) < 10:
+            return
+        
+        features_list = []
+        for email in emails:
+            features = self.extract_email_features(email)
+            features_list.append(features)
+        
+        if features_list:
+            self.ml_model.fit(features_list)
+            
+            # Store baseline statistics
+            email_lengths = [len(e['body']) for e in emails]
+            send_hours = [e['timestamp'].hour for e in emails]
+            
+            self.user_baseline = {
+                'total_emails': len(emails),
+                'avg_length': np.mean(email_lengths),
+                'std_length': np.std(email_lengths),
+                'common_hours': np.bincount(send_hours).argmax(),
+                'weekend_ratio': sum(1 for e in emails if e['timestamp'].weekday() >= 5) / len(emails)
+            }
+    
+    def extract_email_features(self, email):
+        """Extract numerical features from email for ML analysis"""
+        body = email.get('body', '')
+        timestamp = email.get('timestamp', datetime.now())
+        
+        return [
+            timestamp.hour,                    # Send hour
+            timestamp.weekday(),               # Day of week
+            len(body),                         # Content length
+            body.count('!'),                   # Exclamation marks
+            body.count('http'),                # URL count
+            len(re.findall(r'[A-Z]', body)),   # Capital letters
+            sum(1 for word in self.phish_keywords if word.lower() in body.lower()),  # Suspicious keywords
+            len(body.split()),                 # Word count
+            body.count('$'),                   # Money symbols
+            1 if timestamp.weekday() >= 5 else 0  # Weekend flag
+        ]
+    
+    def analyze_comprehensive(self, email):
+        """Complete security analysis using all detection methods"""
+        analysis_results = {
+            'total_score': 0,
+            'flags': [],
+            'components': {},
+            'breach_info': {'count': 0, 'breaches': []},
+            'processing_time': 0
+        }
+        
+        start_time = time.time()
+        
+        # Component 1: Heuristic Analysis (Rule-based detection)
+        heuristic_score, heuristic_flags = self.analyze_heuristic_patterns(email)
+        analysis_results['components']['Heuristic Analysis'] = heuristic_score
+        analysis_results['flags'].extend(heuristic_flags)
+        
+        # Component 2: Code Injection Detection
+        injection_score, injection_flags = self.analyze_code_injection(email)
+        analysis_results['components']['Code Injection Detection'] = injection_score
+        analysis_results['flags'].extend(injection_flags)
+        
+        # Component 3: AI-Enhanced Analysis (API calls)
+        api_score, api_flags, breach_info = self.analyze_with_ai_apis(email)
+        analysis_results['components']['AI Analysis'] = api_score
+        analysis_results['flags'].extend(api_flags)
+        analysis_results['breach_info'] = breach_info
+        
+        # Component 4: Behavioral Anomaly Detection
+        if self.user_baseline:
+            ml_score, ml_flags = self.analyze_behavioral_anomalies(email)
+            analysis_results['components']['Behavioral Analysis'] = ml_score
+            analysis_results['flags'].extend(ml_flags)
+        else:
+            analysis_results['components']['Behavioral Analysis'] = 0
+        
+        # Calculate total score (capped at 100)
+        total_score = sum(analysis_results['components'].values())
+        analysis_results['total_score'] = min(total_score, 100)
+        analysis_results['processing_time'] = round(time.time() - start_time, 2)
+        
+        return analysis_results
+    
+    def analyze_heuristic_patterns(self, email):
+        """Traditional rule-based phishing detection"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '').lower()
+        subject = email.get('subject', '').lower()
+        sender = email.get('from', '').lower()
+        
+        # Suspicious keyword detection
+        keyword_count = 0
+        for keyword in self.phish_keywords:
+            if keyword in body or keyword in subject:
+                keyword_count += 1
+                if keyword_count == 1:  # Only flag once
+                    score += 15
+                    flags.append(f"Suspicious keywords detected: {keyword_count} matches")
+        
+        # URL analysis
+        urls = re.findall(r'http[s]?://[^\s<>"]+', email.get('body', ''))
+        suspicious_url_indicators = ['bit.ly', 'tinyurl', 'fake', 'suspicious', 'urgent', 'security']
+        
+        for url in urls[:5]:  # Check first 5 URLs
+            if any(indicator in url.lower() for indicator in suspicious_url_indicators):
+                score += 12
+                flags.append("Suspicious URL detected")
+                break
+        
+        # Sender analysis
+        if any(suspicious in sender for suspicious in ['urgent', 'security', 'alert', 'noreply']):
+            score += 8
+            flags.append("Suspicious sender address pattern")
+        
+        # Urgency language patterns
+        urgency_patterns = [r'\b(urgent|immediate|asap|expires?|deadline|final notice)\b']
+        urgency_matches = sum(len(re.findall(pattern, body, re.IGNORECASE)) for pattern in urgency_patterns)
+        if urgency_matches >= 2:
+            score += 10
+            flags.append("High urgency language detected")
+        
+        return min(score, 35), flags
+    
+    def analyze_code_injection(self, email):
+        """Detect malicious code injection attempts"""
+        score = 0
+        flags = []
+        
+        body = email.get('body', '')
+        
+        # JavaScript injection patterns
+        js_detections = 0
+        for pattern in self.injection_patterns:
+            matches = re.findall(pattern, body, re.IGNORECASE | re.DOTALL)
+            if matches:
+                js_detections += len(matches)
+        
+        if js_detections > 0:
+            score += min(js_detections * 15, 30)
+            flags.append(f"JavaScript injection patterns detected ({js_detections} instances)")
+        
+        # Encoded payload detection
+        encoded_patterns = [r'atob\s*\(', r'fromCharCode\s*\(', r'unescape\s*\(', r'decodeURI']
+        encoded_count = sum(len(re.findall(pattern, body, re.IGNORECASE)) for pattern in encoded_patterns)
+        
+        if encoded_count > 0:
+            score += 20
+            flags.append("Encoded payload detected - potential obfuscated malware")
+        
+        # HTML event handler injection
+        event_handlers = re.findall(r'on\w+\s*=\s*["\'][^"\']*["\']', body, re.IGNORECASE)
+        if event_handlers:
+            score += 15
+            flags.append("HTML event handler injection detec
