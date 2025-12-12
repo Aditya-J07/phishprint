@@ -99,16 +99,6 @@ phishprint/
    - Start analyzing URLs and email content!
 
 ---
-
-## 📸 Screenshots / Demo
-*[Add screenshots of your application here]*
-
-![Dashboard](attached_assets/dashboard.png)
-![URL Analysis](attached_assets/url-analysis.png)
-![Risk Report](attached_assets/risk-report.png)
-
----
-
 ## 🎯 How It Works
 
 ### 1. **URL Analysis**
@@ -166,26 +156,6 @@ phishprint/
 
 ---
 
-## 🛠️ Development
-
-### Running Tests
-```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest --cov=phishprint tests/
-```
-
-### Code Quality
-```bash
-# Linting
-flake8 .
-
-# Formatting
-black .
-```
-
 ---
 
 ## 🤝 Contributing
@@ -232,13 +202,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## ⚠️ Disclaimer
 This tool is designed for **educational and research purposes**. Always exercise caution when analyzing suspicious content and follow responsible disclosure practices for security vulnerabilities.
-
----
-
-## 📞 Support
-- 🐛 [Report Issues](https://github.com/Aditya-J07/phishprint/issues)
-- 💡 [Feature Requests](https://github.com/Aditya-J07/phishprint/issues)
-- 📧 Contact: [Create an issue for support]
 
 ---
 
