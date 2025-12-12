@@ -251,49 +251,93 @@ GUIDELINES:
             return self._fallback_response(question, email_context, analysis_results)
     
     def _fallback_response(self, question, email_context, analysis_results):
-        """Enhanced fallback responses when Gemini is unavailable"""
+        """Enhanced fallback responses with comprehensive question handling"""
         q_lower = question.lower()
         score = analysis_results.get('total_score', 0)
         flags = analysis_results.get('flags', [])
         tags = analysis_results.get('tags', [])
+        sender = email_context.get('from', 'Unknown sender')
+        subject = email_context.get('subject', 'No subject')
         
-        if 'safe' in q_lower or 'trust' in q_lower:
+        # Safety and trust questions
+        if any(word in q_lower for word in ['safe', 'trust', 'legitimate', 'real']):
             if score >= 70:
-                return f"🚨 **DANGER**: This email is NOT safe (Score: {score}/100). Multiple security threats detected including: {', '.join(tags[:2]) if tags else 'unknown threats'}. Do not click any links or download attachments. Report this as spam immediately."
+                return f"🚨 **EXTREMELY DANGEROUS**: This email is NOT safe (Risk Score: {score}/100). Detected threats: {', '.join(tags[:3]) if tags else 'multiple security violations'}. NEVER click links or download attachments. Report as phishing immediately and delete."
             elif score >= 40:
-                return f"⚠️ **CAUTION**: This email has moderate risk (Score: {score}/100). Verify the sender through alternative means before taking any action. Be suspicious of urgent requests or unexpected attachments."
+                return f"⚠️ **PROCEED WITH CAUTION**: This email has moderate risk (Score: {score}/100). Verify sender identity through separate communication channel. Be suspicious of urgency tactics and unexpected requests for sensitive information."
             else:
-                return f"✅ **SAFE**: This email appears legitimate (Score: {score}/100). However, always remain vigilant with unexpected requests for sensitive information."
+                return f"✅ **APPEARS SAFE**: Email shows low risk indicators (Score: {score}/100). However, always verify unexpected requests and avoid sharing sensitive information via email."
         
-        elif 'why' in q_lower and ('score' in q_lower or 'risk' in q_lower):
+        # Risk score explanations
+        elif any(phrase in q_lower for phrase in ['why score', 'why risk', 'how calculated', 'explain score']):
             if flags:
-                threat_list = ', '.join(flags[:3])
-                return f"The risk score is based on these security factors: {threat_list}. Our AI detected patterns commonly used in malicious emails including suspicious keywords, URLs, or code injection attempts."
+                threat_details = '; '.join(flags[:4])
+                return f"🔍 **Risk Analysis**: Score based on: {threat_details}. Our AI analyzes keywords, URL patterns, sender reputation, content structure, and behavioral anomalies to detect threats."
             else:
-                return f"The low risk score ({score}/100) indicates normal email patterns with no significant red flags. The sender's behavior, content style, and technical elements appear legitimate."
+                return f"📊 **Low Risk Indicators**: Score ({score}/100) reflects normal email patterns with legitimate sender behavior, appropriate content tone, and no suspicious technical elements."
         
-        elif 'phish' in q_lower or 'scam' in q_lower:
+        # Phishing and scam questions
+        elif any(word in q_lower for word in ['phish', 'scam', 'fake', 'fraud']):
             if 'phishing' in tags:
-                return "🎣 **Phishing Detected**: This email uses psychological manipulation tactics to trick you into revealing sensitive information. Common signs include urgent language, fake security alerts, and suspicious links. Never enter passwords or personal data from email links."
+                return "🎣 **CONFIRMED PHISHING**: Email uses social engineering tactics - urgent language, fake authority, credential harvesting attempts. Classic signs: pressure to act fast, suspicious links, requests for passwords/personal info."
             else:
-                return "While this specific email doesn't show obvious phishing signs, always be cautious of: urgent payment requests, grammar mistakes, unfamiliar senders asking for personal info, and shortened URLs."
+                return "🛡️ **Phishing Prevention**: No obvious phishing detected, but stay vigilant for: urgency tactics, grammar errors, unexpected prize notifications, requests for sensitive data, or links to unfamiliar domains."
         
-        elif 'code' in q_lower or 'injection' in q_lower or 'malware' in q_lower:
+        # Malware and code injection
+        elif any(word in q_lower for word in ['malware', 'virus', 'code', 'injection', 'script', 'dangerous']):
             if 'injection' in tags:
-                return "💻 **Code Injection Alert**: This email contains malicious scripts that could execute automatically when opened or viewed. This is extremely dangerous - do not interact with this email. Report it to your IT security team immediately."
+                return "⚠️ **MALICIOUS CODE DETECTED**: Email contains executable scripts that could compromise your device. These run automatically when email opens. IMMEDIATE ACTION: Don't interact with email, report to IT security, scan device."
             else:
-                return "No malicious code detected in this email. However, always be cautious of unexpected attachments, especially .exe, .bat, .scr files, or office documents with macros enabled."
+                return "🔒 **Code Security**: No malicious scripts detected. Still avoid: executable attachments (.exe, .scr, .bat), macro-enabled documents, or clicking suspicious links that could download malware."
         
-        elif 'what' in q_lower and 'do' in q_lower:
+        # Action recommendations
+        elif any(phrase in q_lower for phrase in ['what do', 'should i do', 'next steps', 'action', 'how respond']):
             if score >= 70:
-                return "🛑 **IMMEDIATE ACTIONS**: 1) Do NOT click any links or attachments 2) Mark as spam/phishing 3) Report to your IT security team 4) Delete the email 5) If you already clicked something, scan your device for malware and change any passwords you may have entered."
+                return "🚨 **CRITICAL ACTIONS**: 1) DO NOT interact with email 2) Mark as phishing/spam 3) Report to security team 4) Delete immediately 5) If you clicked anything: change passwords, scan device, monitor accounts for suspicious activity."
             elif score >= 40:
-                return "⚠️ **RECOMMENDED ACTIONS**: 1) Verify sender identity through alternative contact method 2) Don't rush - ignore urgency pressure 3) Check URLs by hovering (don't click) 4) Consult with IT/security team if unsure 5) When in doubt, delete it."
+                return "⚠️ **VERIFICATION STEPS**: 1) Contact sender via phone/separate channel 2) Don't respond to urgency pressure 3) Hover over (don't click) links to check destinations 4) Forward to security team for review 5) When unsure, err on side of caution."
             else:
-                return "✅ **STANDARD PRECAUTIONS**: While this email appears safe, always: 1) Verify unexpected requests 2) Be cautious with attachments 3) Check URLs before clicking 4) Keep your security software updated 5) Trust your instincts if something feels off."
+                return "✅ **STANDARD SECURITY**: 1) Verify any unexpected requests 2) Check sender's email carefully 3) Be cautious with attachments 4) Use 2FA where possible 5) Keep software updated 6) Trust your instincts."
         
+        # Sender verification
+        elif any(word in q_lower for word in ['sender', 'from', 'who sent', 'legitimate sender']):
+            return f"👤 **Sender Analysis**: From '{sender}'. {'⚠️ Suspicious domain detected' if any(suspicious in sender.lower() for suspicious in ['fake', 'verification', 'security-', '-security']) else '✓ Domain appears normal'}. Always verify sender identity through alternative contact methods for important requests."
+        
+        # URL and link safety
+        elif any(word in q_lower for word in ['link', 'url', 'click', 'website']):
+            urls_detected = len([flag for flag in flags if 'url' in flag.lower() or 'link' in flag.lower()])
+            if urls_detected > 0:
+                return f"🔗 **SUSPICIOUS LINKS DETECTED**: Found {urls_detected} potentially dangerous URLs. NEVER click these links. They may: steal credentials, download malware, or redirect to phishing sites. Use hover-preview to check destinations safely."
+            else:
+                return "🔗 **Link Safety**: No obviously suspicious links detected, but always: 1) Hover to preview destinations 2) Look for misspelled domains 3) Avoid shortened URLs from unknown senders 4) Type URLs manually when possible."
+        
+        # Email content analysis
+        elif any(word in q_lower for word in ['content', 'message', 'text', 'body']):
+            urgency_words = ['urgent', 'immediate', 'expires', 'limited time', 'act now']
+            urgency_detected = sum(1 for word in urgency_words if word in email_context.get('body', '').lower())
+            if urgency_detected >= 2:
+                return f"⏰ **URGENCY MANIPULATION**: Email uses {urgency_detected} urgency tactics to pressure quick action. This is a classic manipulation technique. Legitimate organizations rarely demand immediate action via email."
+            else:
+                return f"📝 **Content Analysis**: Email tone appears {'professional and measured' if score < 40 else 'potentially manipulative'}. Key indicators: urgency level, grammar quality, personalization, and request appropriateness."
+        
+        # General help and education
+        elif any(word in q_lower for word in ['help', 'explain', 'learn', 'understand', 'tell me']):
+            return f"🎓 **Security Education**: Current email risk level: {analysis_results.get('risk_level', 'UNKNOWN')} ({score}/100). I can help with: 'Is this safe?', 'Why this score?', 'What should I do?', 'Is this phishing?', 'Check the sender', 'Analyze the content', or 'Explain the links'."
+        
+        # Default response with suggested questions
         else:
-            return f"I can help you understand this email's security. Current risk level: {analysis_results.get('risk_level', 'UNKNOWN')} ({score}/100). Ask me about: 'Is this safe?', 'Why is the score high?', 'What should I do?', or 'Is this phishing?'."
+            suggestions = [
+                "Is this email safe to trust?",
+                "Why did this get a high/low risk score?", 
+                "What should I do about this email?",
+                "Is this a phishing attempt?",
+                "Who is the sender and are they legitimate?",
+                "Are there any dangerous links?",
+                "What makes this email suspicious?",
+                "How can I protect myself?"
+            ]
+            random_suggestions = np.random.choice(suggestions, 3, replace=False)
+            return f"🤖 **AI Security Assistant**: Risk Level {analysis_results.get('risk_level', 'UNKNOWN')} ({score}/100). Try asking: '{random_suggestions[0]}', '{random_suggestions[1]}', or '{random_suggestions[2]}'. I can analyze any aspect of this email's security."
 
 class EmailSecurityEngine:
     """Core security analysis engine"""
@@ -326,9 +370,10 @@ class EmailSecurityEngine:
         self.setup_demo_data()
     
     def setup_demo_data(self):
-        """Initialize with demo data"""
-        # Demo emails with realistic scenarios
+        """Initialize with expanded demo data"""
+        # Comprehensive demo emails with diverse scenarios
         self.demo_emails = {
+            # LEGITIMATE EMAILS (LOW RISK)
             "📧 Normal Work Email": {
                 'from': 'sarah.johnson@company.com',
                 'subject': 'Weekly Team Status Update',
@@ -336,6 +381,29 @@ class EmailSecurityEngine:
                 'timestamp': datetime.now() - timedelta(hours=2),
                 'risk_level': 'low'
             },
+            "📅 Meeting Reminder": {
+                'from': 'calendar@company.com',
+                'subject': 'Reminder: Quarterly Review Meeting Tomorrow at 2 PM',
+                'body': 'This is a friendly reminder about tomorrow\'s quarterly review meeting. Please prepare your project reports and join us in Conference Room B at 2:00 PM. Looking forward to seeing everyone there!',
+                'timestamp': datetime.now() - timedelta(hours=18),
+                'risk_level': 'low'
+            },
+            "📦 Amazon Order": {
+                'from': 'shipment-tracking@amazon.com',
+                'subject': 'Your order has been shipped - Track your package',
+                'body': 'Great news! Your recent order #112-4567890-1234567 has been shipped and is on its way. You can track your package using the tracking number: 1Z999AA1234567890. Expected delivery: Tomorrow by 8 PM.',
+                'timestamp': datetime.now() - timedelta(hours=4),
+                'risk_level': 'low'
+            },
+            "💰 Bank Statement": {
+                'from': 'statements@wellsfargo.com',
+                'subject': 'Your monthly statement is ready',
+                'body': 'Your Wells Fargo monthly statement for December 2025 is now available in your online banking portal. Please log in to review your account activity and transactions.',
+                'timestamp': datetime.now() - timedelta(hours=8),
+                'risk_level': 'low'
+            },
+            
+            # PHISHING EMAILS (HIGH RISK)
             "🚨 PayPal Phishing": {
                 'from': 'security@paypal-security.net',
                 'subject': 'URGENT: Account Suspended - Immediate Action Required!',
@@ -343,19 +411,81 @@ class EmailSecurityEngine:
                 'timestamp': datetime.now() - timedelta(minutes=45),
                 'risk_level': 'high'
             },
-            "🎯 Spear Phishing": {
-                'from': 'mike.davidson@company.com',
-                'subject': 'Urgent Financial Approval Needed - Weekend Request',
-                'body': 'Hi, I need urgent approval for a $15,000 vendor payment. CEO is traveling and this needs to be done today. Please click here to approve: http://finance-portal.fake-company.com/approve',
-                'timestamp': datetime.now() - timedelta(hours=6),
+            "🏦 Bank Phishing": {
+                'from': 'security@chase-verification.net',
+                'subject': 'Urgent: Verify Your Account to Prevent Closure',
+                'body': 'Dear Valued Customer, We detected unusual activity on your account. Your online banking will be suspended in 24 hours unless you verify immediately. Click here to verify: http://chase-verify.suspicious-domain.com/login',
+                'timestamp': datetime.now() - timedelta(hours=1),
                 'risk_level': 'high'
             },
-            "💻 Code Injection": {
+            "🎁 Lottery Scam": {
+                'from': 'winner@internationallottery.org',
+                'subject': 'CONGRATULATIONS! You\'ve Won $500,000 in International Lottery!',
+                'body': 'Congratulations! You have been selected as a winner in our international lottery promotion. You have won $500,000 USD! To claim your prize, send us your personal details and banking information immediately. Act now - this offer expires in 48 hours!',
+                'timestamp': datetime.now() - timedelta(hours=3),
+                'risk_level': 'high'
+            },
+            "📱 Apple ID Phishing": {
+                'from': 'security@apple-verification.com',
+                'subject': 'Your Apple ID has been locked due to suspicious activity',
+                'body': 'Your Apple ID was used to sign in to a device we don\'t recognize. If this wasn\'t you, your account may be compromised. Click here immediately to verify: http://appleid-verify.fake-site.com/secure',
+                'timestamp': datetime.now() - timedelta(minutes=30),
+                'risk_level': 'high'
+            },
+            
+            # SPEAR PHISHING (HIGH RISK)
+            "🎯 CEO Fraud": {
+                'from': 'john.smith@company-ceo.com',
+                'subject': 'Urgent: Confidential Wire Transfer Needed Today',
+                'body': 'Hi, I need you to process an urgent wire transfer for a confidential acquisition deal. Transfer $50,000 to account 123456789 at First National Bank immediately. This is time-sensitive and confidential. Don\'t discuss with anyone.',
+                'timestamp': datetime.now() - timedelta(minutes=20),
+                'risk_level': 'high'
+            },
+            "🎯 HR Impersonation": {
+                'from': 'hr.admin@company.com',
+                'subject': 'Action Required: Update Your Payroll Information',
+                'body': 'Dear Employee, Due to system updates, you must re-verify your payroll information by end of day or your next paycheck will be delayed. Click here to update: http://company-payroll-update.malicious-site.com',
+                'timestamp': datetime.now() - timedelta(hours=2),
+                'risk_level': 'high'
+            },
+            
+            # CODE INJECTION (HIGH RISK)
+            "💻 Newsletter Injection": {
                 'from': 'newsletter@techdeals.com',
                 'subject': 'Weekly Tech Deals Newsletter - 50% Off Selected Items',
                 'body': 'Don\'t miss out on this week\'s amazing tech deals! <script>eval(atob("d2luZG93LmxvY2F0aW9uPSJodHRwOi8vbWFsaWNpb3VzLXNpdGUuY29tIjs="))</script> Click here for more: http://techdeals.com/deals',
                 'timestamp': datetime.now() - timedelta(hours=12),
                 'risk_level': 'high'
+            },
+            "💻 HTML Injection": {
+                'from': 'updates@social-network.com',
+                'subject': 'You have 5 new notifications',
+                'body': 'You have new activity on your account! <img src="x" onerror="javascript:window.location=\'http://malicious-site.com/steal-cookies\'"> Check your notifications now: http://social-network.com/notifications',
+                'timestamp': datetime.now() - timedelta(hours=6),
+                'risk_level': 'high'
+            },
+            
+            # SUSPICIOUS BUT MEDIUM RISK
+            "⚠️ Unknown Sender": {
+                'from': 'info@random-marketing.biz',
+                'subject': 'Limited Time Offer - Make Money Online Fast!',
+                'body': 'Discover the secret to making $5000 per month from home! Our exclusive system has helped thousands of people quit their day jobs. Limited time offer - only $97 (usually $497). Order now!',
+                'timestamp': datetime.now() - timedelta(hours=10),
+                'risk_level': 'medium'
+            },
+            "⚠️ Shortened URL": {
+                'from': 'marketing@deals-today.com',
+                'subject': 'Flash Sale: 80% Off Everything - Today Only!',
+                'body': 'Don\'t miss our biggest sale of the year! Get 80% off everything in our store. Use code FLASH80 at checkout. Shop now: http://tinyurl.com/suspicious-deal Act fast - sale ends tonight at midnight!',
+                'timestamp': datetime.now() - timedelta(hours=5),
+                'risk_level': 'medium'
+            },
+            "⚠️ Romance Scam": {
+                'from': 'beautifulwoman2025@email.com',
+                'subject': 'Hello Handsome! I saw your profile...',
+                'body': 'Hi there! I came across your profile and was impressed. I\'m a beautiful single woman looking for a serious relationship. I\'d love to get to know you better. Can you help me with a small financial situation? I promise to pay you back.',
+                'timestamp': datetime.now() - timedelta(hours=14),
+                'risk_level': 'medium'
             }
         }
         
@@ -628,6 +758,28 @@ class PhishPrintUI:
         """Render detailed analysis panel"""
         st.markdown("### 🔍 Security Analysis")
         
+        # Gmail Input Section
+        st.markdown("""<div class="analysis-panel" style="margin-bottom: 20px; padding: 15px;">
+        <h4 style="color: #667eea; margin-bottom: 10px;">📧 Connect Your Gmail</h4>
+        </div>""", unsafe_allow_html=True)
+        
+        gmail_email = st.text_input(
+            "Enter your Gmail address to fetch and analyze your real inbox:",
+            placeholder="your.email@gmail.com",
+            help="This will connect to Gmail API to fetch your emails for analysis"
+        )
+        
+        if gmail_email:
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("🔗 Connect Gmail", type="primary"):
+                    st.info("📧 Gmail integration coming soon! For now, enjoy analyzing our comprehensive demo emails below.")
+            with col2:
+                if st.button("📥 Refresh Inbox"):
+                    st.info("🔄 Demo mode active - showing sample emails with various threat scenarios")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
         if not st.session_state.selected_email:
             st.markdown("""
             <div class="analysis-panel">
@@ -804,5 +956,5 @@ def main():
     app = PhishPrintApp()
     app.run()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
